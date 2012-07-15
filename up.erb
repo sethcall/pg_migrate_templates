@@ -1,0 +1,27 @@
+-- beginning pg_migrate header, migration=<%= migration_def.name %>
+\set ON_ERROR_STOP 1
+
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+-- we want to ensure no one else is running this migration concurrently
+LOCK TABLE pg_migrations IN ACCESS EXCLUSIVE MODE;
+
+SELECT verify_against_existing_migrations('<%= migration_def.name %>', <%= migration_def.ordinal %>);
+
+\set ON_ERROR_STOP 0 -- to allow exception in CHECK_IF_MIGRATED to cause rollback, not failure
+
+SELECT bypass_existing_migration('<%= migration_def.name %>');
+
+\set ON_ERROR_STOP 1 -- if the content of the migration is bad, we want psql to stop.
+
+
+-- beginning user sql, migration=<%= migration_def.name %>
+
+<%= migration_content %>
+
+-- beginning pg_migrate footer, migration=<%= migration_def.name %>
+
+SELECT record_migration('<%= migration_def.name %>', <%= migration_def.ordinal %>, '0.0.1-ruby', '0.0.1-ruby');
+
+COMMIT;
+-- end pg_migrate migration, migration=<%= migration_def.name %>

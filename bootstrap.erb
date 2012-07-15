@@ -1,0 +1,135 @@
+-- pg_migrate bootstrap
+-- purpose: responsible for creating or updating pg_migration internal tables
+-- when:    this script should be called before every migration attempt, to be safe.
+--  except:  if you know you have not updated the pg_migrate tool itself,
+--           and you know you have run this file at least once before on the current database,
+--           then you don't have to run this again.
+
+\set ON_ERROR_STOP 1
+
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+
+CREATE OR REPLACE FUNCTION bootstrap_pg_migrate() RETURNS void AS $$
+DECLARE
+    found_pg_migrate information_schema.tables;
+    found_pg_migrations information_schema.tables;
+
+BEGIN
+    BEGIN
+        SELECT * INTO STRICT found_pg_migrate FROM information_schema.tables WHERE table_name = 'pg_migrate';
+
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                CREATE TABLE pg_migrate (id BIGSERIAL PRIMARY KEY, template_version VARCHAR(255), builder_version VARCHAR(255), migrator_version VARCHAR(255), database_version VARCHAR(1024));
+                CREATE INDEX pg_migrate_unique_index ON pg_migrate (template_version, builder_version, migrator_version, database_version);
+
+            WHEN TOO_MANY_ROWS THEN
+                RAISE EXCEPTION 'Multiple pg_migrate tables.  Unique key on information_schema.tables should have prevented this.';
+    END;
+
+    BEGIN
+        SELECT * INTO STRICT found_pg_migrations FROM information_schema.tables WHERE table_name = 'pg_migrations';
+
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                CREATE TABLE pg_migrations(
+                    name VARCHAR(255) PRIMARY KEY,
+                    ordinal INTEGER NOT NULL,
+                    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    finalized SMALLINT DEFAULT 1,
+                    pg_migrate_id BIGINT NOT NULL REFERENCES pg_migrate(id));
+            WHEN TOO_MANY_ROWS THEN
+                RAISE EXCEPTION 'Multiple pg_migrations tables.  Unique key on information_schema.tables should have prevented this.';
+    END;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+SELECT bootstrap_pg_migrate();
+
+-- verifies that the specified migration name has the expected ordinal.  No exception is thrown if no migration
+-- of this name exists, and no exception is thrown if the migration + ordinal pair is found on a single row.
+-- Only if the migrtion is found with the wrong row is an exception thrown.
+CREATE OR REPLACE FUNCTION verify_against_existing_migrations(migration varchar(255), ordinal integer) RETURNS VOID AS $$
+DECLARE
+ found_migration pg_migrations;
+BEGIN
+  BEGIN
+   EXECUTE 'SELECT * FROM pg_migrations WHERE name=$1' INTO STRICT found_migration USING migration;
+   EXCEPTION
+     WHEN NO_DATA_FOUND THEN
+        -- if no data, then the migration is unrun.  At this phase
+        RETURN;
+     WHEN TOO_MANY_ROWS THEN
+        -- this is certainly an odd scenario, because how could this happen unless the user dropped unique key on 'name' column?
+        RAISE EXCEPTION 'pg_migrate: code=pg_migrations_uniqueness_error, migration=%.', migration;
+  END;
+
+  -- one row has been found; verify ordinal is correct
+  IF found_migration.ordinal <> ordinal THEN
+    RAISE EXCEPTION 'pg_migrate: code=incorrect_ordinal, migration=%, expected_ordinal=%, actual_ordinal', migration, ordinal, found_migration.ordinal;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- checks if the current script has been executed or not, and throws an exception if so
+-- callers should check for 'pg_migrate: code=migration_exists' to know whether they should quietly ignore exception.
+-- psql can only do this by calling \set ON_ERROR_STOP 1 (which is done by templates already)
+CREATE OR REPLACE FUNCTION bypass_existing_migration(migration varchar(255)) RETURNS VOID AS $$
+DECLARE
+ found_migration pg_migrations;
+BEGIN
+  BEGIN
+   EXECUTE 'SELECT * FROM pg_migrations WHERE name=$1' INTO STRICT found_migration USING migration ;
+   EXCEPTION
+     WHEN NO_DATA_FOUND THEN
+        -- if no data, then success.  just return with no exception thrown
+        RETURN;
+     WHEN TOO_MANY_ROWS THEN
+        -- this path should never happen because this same condition is already checked via 'verify_against_existing_migrations'
+        RAISE EXCEPTION 'pg_migrate: code=pg_migrations_uniqueness_error, migration=%', migration;
+  END;
+
+  RAISE EXCEPTION 'pg_migrate: code=migration_exists, migration=%', migration;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- used to mark a migration as finished
+CREATE OR REPLACE FUNCTION record_migration(migration varchar(255), ordinal INTEGER, builder_version VARCHAR(255), migrator_version VARCHAR(255)) RETURNS VOID AS $$
+DECLARE
+    found_pg_migrate_id BIGINT;
+BEGIN
+    BEGIN
+        -- first look for existing pg_migrate row satisfying version columns
+        -- but if not found, create that row
+        -- in either case, found_pg_migrate_id will have the row id
+        EXECUTE 'SELECT id FROM pg_migrate WHERE
+                    template_version=$1 and builder_version=$2 and migrator_version=$3 and database_version=$4'
+                INTO found_pg_migrate_id USING '0.0.1', builder_version, migrator_version, (select version());
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                found_pg_migrate_id = NULL;
+            WHEN TOO_MANY_ROWS THEN
+                -- this path should never occur because of the multi-column index on pg_migrate
+                RAISE EXCEPTION 'pg_migrate: code=pg_migrate_uniqueness_error, migration=%, ordinal=%, template_version=%, builder_version=%, migrator_version=%, database_version', migration, ordinal, '0.0.1', builder_version, migrator_version, (select version());
+    END;
+
+    IF found_pg_migrate_id IS NULL THEN
+        INSERT INTO pg_migrate(id, template_version, builder_version, migrator_version, database_version)
+            VALUES (default, '0.0.1', builder_version, migrator_version, (select version())) RETURNING id INTO found_pg_migrate_id;
+    END IF;
+
+    -- create a new record in pg_migrations table, ensuring this migration won't be run again
+    EXECUTE 'INSERT INTO pg_migrations(name, ordinal, created, finalized, pg_migrate_id)
+        VALUES ($1, $2, CURRENT_TIMESTAMP, 1, $3)' USING migration, ordinal, found_pg_migrate_id;
+
+END;
+$$ LANGUAGE plpgsql;
+
+COMMIT;
+
+
+
