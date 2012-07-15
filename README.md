@@ -5,6 +5,10 @@ A repository of just the sql 'wrappers' in template form, so that downstream pg_
 
 The wrappers use plpgsql liberally.
 
+Version
+-------
+master = version 0.0.1 (read: alpha).
+
 Overview
 --------
 These templates follow .erb style syntax, but are purposefully without anything but string substitution, meaning any non-Ruby language could readily do a string replacement on the few locations where <%= var %> syntax is used.
