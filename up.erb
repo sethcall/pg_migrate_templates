@@ -8,12 +8,13 @@ LOCK TABLE pg_migrations IN ACCESS EXCLUSIVE MODE;
 
 SELECT verify_against_existing_migrations('<%= migration_def.name %>', <%= migration_def.ordinal %>);
 
-\set ON_ERROR_STOP 0 -- to allow exception in CHECK_IF_MIGRATED to cause rollback, not failure
+-- to allow exception in CHECK_IF_MIGRATED to cause rollback, not failure
+\set ON_ERROR_STOP 0
 
 SELECT bypass_existing_migration('<%= migration_def.name %>');
 
-\set ON_ERROR_STOP 1 -- if the content of the migration is bad, we want psql to stop.
-
+-- if the content of the migration is bad, we want psql to stop.
+\set ON_ERROR_STOP 1
 
 -- beginning user sql, migration=<%= migration_def.name %>
 
