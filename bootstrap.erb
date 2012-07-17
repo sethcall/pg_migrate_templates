@@ -59,17 +59,23 @@ BEGIN
    EXECUTE 'SELECT * FROM pg_migrations WHERE name=$1' INTO STRICT found_migration USING migration;
    EXCEPTION
      WHEN NO_DATA_FOUND THEN
-        -- if no data, then the migration is unrun.  At this phase
+        -- if no data, then this migration is unrun.  One more check remains...
+        -- if the last run migration's ordinal is 1 less than this one, we are ready to go.
+        IF coalesce((SELECT MAX(p.ordinal) FROM pg_migrations as p), -1) <> ordinal - 1 THEN
+            RAISE EXCEPTION 'pg_migrate: code=missing_migration, migration=%, ordinal=%, last_ordinal=%', migration, ordinal, (SELECT MAX(p.ordinal) FROM pg_migrations as p);
+        END IF;
+
         RETURN;
      WHEN TOO_MANY_ROWS THEN
         -- this is certainly an odd scenario, because how could this happen unless the user dropped unique key on 'name' column?
-        RAISE EXCEPTION 'pg_migrate: code=pg_migrations_uniqueness_error, migration=%.', migration;
+        RAISE EXCEPTION 'pg_migrate: code=pg_migrations_uniqueness_error, migration=%', migration;
   END;
 
   -- one row has been found; verify ordinal is correct
   IF found_migration.ordinal <> ordinal THEN
     RAISE EXCEPTION 'pg_migrate: code=incorrect_ordinal, migration=%, expected_ordinal=%, actual_ordinal', migration, ordinal, found_migration.ordinal;
   END IF;
+
 END;
 $$ LANGUAGE plpgsql;
 
@@ -98,28 +104,32 @@ $$ LANGUAGE plpgsql;
 
 
 -- used to mark a migration as finished
-CREATE OR REPLACE FUNCTION record_migration(migration varchar(255), ordinal INTEGER, builder_version VARCHAR(255), migrator_version VARCHAR(255)) RETURNS VOID AS $$
+CREATE OR REPLACE FUNCTION record_migration(migration varchar(255), ordinal INTEGER, template_version VARCHAR(255), builder_version VARCHAR(255)) RETURNS VOID AS $$
 DECLARE
     found_pg_migrate_id BIGINT;
+    migrator_version VARCHAR(255);
 BEGIN
+
+    EXECUTE 'SELECT current_setting(''application_name'')' INTO migrator_version;
+
     BEGIN
         -- first look for existing pg_migrate row satisfying version columns
         -- but if not found, create that row
         -- in either case, found_pg_migrate_id will have the row id
         EXECUTE 'SELECT id FROM pg_migrate WHERE
                     template_version=$1 and builder_version=$2 and migrator_version=$3 and database_version=$4'
-                INTO found_pg_migrate_id USING '0.0.1', builder_version, migrator_version, (select version());
+                INTO found_pg_migrate_id USING template_version, builder_version, migrator_version, (select version());
         EXCEPTION
             WHEN NO_DATA_FOUND THEN
                 found_pg_migrate_id = NULL;
             WHEN TOO_MANY_ROWS THEN
                 -- this path should never occur because of the multi-column index on pg_migrate
-                RAISE EXCEPTION 'pg_migrate: code=pg_migrate_uniqueness_error, migration=%, ordinal=%, template_version=%, builder_version=%, migrator_version=%, database_version', migration, ordinal, '0.0.1', builder_version, migrator_version, (select version());
+                RAISE EXCEPTION 'pg_migrate: code=pg_migrate_uniqueness_error, migration=%, ordinal=%, template_version=%, builder_version=%, migrator_version=%, database_version', migration, ordinal, template_version, builder_version, migrator_version, (select version());
     END;
 
     IF found_pg_migrate_id IS NULL THEN
         INSERT INTO pg_migrate(id, template_version, builder_version, migrator_version, database_version)
-            VALUES (default, '0.0.1', builder_version, migrator_version, (select version())) RETURNING id INTO found_pg_migrate_id;
+            VALUES (default, template_version, builder_version, migrator_version, (select version())) RETURNING id INTO found_pg_migrate_id;
     END IF;
 
     -- create a new record in pg_migrations table, ensuring this migration won't be run again

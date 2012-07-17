@@ -22,7 +22,7 @@ SELECT bypass_existing_migration('<%= migration_def.name %>');
 
 -- beginning pg_migrate footer, migration=<%= migration_def.name %>
 
-SELECT record_migration('<%= migration_def.name %>', <%= migration_def.ordinal %>, '0.0.1-ruby', '0.0.1-ruby');
+SELECT record_migration('<%= migration_def.name %>', <%= migration_def.ordinal %>, '0.0.1', '<%= builder_version %>');
 
 COMMIT;
 -- end pg_migrate migration, migration=<%= migration_def.name %>
