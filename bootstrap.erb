@@ -103,6 +103,24 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+-- used to verify that the migration being applied is the same as this set or newer.  While the parameter
+-- today is called 'manifest_version', in reality this is just the highest ordinal from the manifest.
+-- so if we find that the database has a higher ordinal than the manifest that built this migration,
+-- then we can kick this out
+CREATE OR REPLACE FUNCTION verify_manifest_is_not_old(manifest_version INTEGER) RETURNS VOID AS $$
+DECLARE
+    max_ordinal INTEGER;
+BEGIN
+    EXECUTE 'SELECT max(ordinal) FROM pg_migrations' INTO max_ordinal;
+
+    IF max_ordinal > manifest_version THEN
+        RAISE EXCEPTION 'pg_migrate: code=old_manifest, max_ordinal_in_db=%, manifest_version=%', max_ordinal, manifest_version;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMIT;
+
 -- used to mark a migration as finished
 CREATE OR REPLACE FUNCTION record_migration(migration varchar(255), ordinal INTEGER, template_version VARCHAR(255), builder_version VARCHAR(255)) RETURNS VOID AS $$
 DECLARE

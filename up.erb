@@ -6,6 +6,8 @@ BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 -- we want to ensure no one else is running this migration concurrently
 LOCK TABLE pg_migrations IN ACCESS EXCLUSIVE MODE;
 
+SELECT verify_manifest_is_not_old(<%= manifest_version %>);
+
 SELECT verify_against_existing_migrations('<%= migration_def.name %>', <%= migration_def.ordinal %>);
 
 -- to allow exception in CHECK_IF_MIGRATED to cause rollback, not failure
