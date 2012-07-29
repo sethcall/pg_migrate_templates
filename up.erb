@@ -4,16 +4,16 @@
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 
 -- we want to ensure no one else is running this migration concurrently
-LOCK TABLE pg_migrations IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE pgmigrate.pg_migrations IN ACCESS EXCLUSIVE MODE;
 
-SELECT verify_manifest_is_not_old(<%= manifest_version %>);
+SELECT pgmigrate.verify_manifest_is_not_old(<%= manifest_version %>);
 
-SELECT verify_against_existing_migrations('<%= migration_def.name %>', <%= migration_def.ordinal %>);
+SELECT pgmigrate.verify_against_existing_migrations('<%= migration_def.name %>', <%= migration_def.ordinal %>);
 
 -- to allow exception in CHECK_IF_MIGRATED to cause rollback, not failure
 \set ON_ERROR_STOP 0
 
-SELECT bypass_existing_migration('<%= migration_def.name %>');
+SELECT pgmigrate.bypass_existing_migration('<%= migration_def.name %>');
 
 -- if the content of the migration is bad, we want psql to stop.
 \set ON_ERROR_STOP 1
@@ -24,7 +24,7 @@ SELECT bypass_existing_migration('<%= migration_def.name %>');
 
 -- beginning pg_migrate footer, migration=<%= migration_def.name %>
 
-SELECT record_migration('<%= migration_def.name %>', <%= migration_def.ordinal %>, '0.0.1', '<%= builder_version %>');
+SELECT pgmigrate.record_migration('<%= migration_def.name %>', <%= migration_def.ordinal %>, '0.1.0', '<%= builder_version %>');
 
 COMMIT;
 -- end pg_migrate migration, migration=<%= migration_def.name %>
