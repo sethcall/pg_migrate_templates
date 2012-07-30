@@ -7,7 +7,7 @@ The wrappers use plpgsql liberally.
 
 Version
 -------
-master = version 0.0.1 (read: alpha).
+master = version 0.1.0 (read: alpha).
 
 Overview
 --------
