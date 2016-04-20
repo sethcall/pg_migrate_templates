@@ -86,7 +86,7 @@ BEGIN
 
   -- one row has been found; verify ordinal is correct
   IF found_migration.ordinal <> ordinal THEN
-    RAISE EXCEPTION 'pg_migrate: code=incorrect_ordinal, migration=%, expected_ordinal=%, actual_ordinal', migration, ordinal, found_migration.ordinal;
+    RAISE EXCEPTION 'pg_migrate: code=incorrect_ordinal, migration=%, expected_ordinal=%, actual_ordinal=%', migration, ordinal, found_migration.ordinal;
   END IF;
 
 END;
@@ -154,7 +154,7 @@ BEGIN
                 found_pg_migrate_id = NULL;
             WHEN TOO_MANY_ROWS THEN
                 -- this path should never occur because of the multi-column index on pg_migrate
-                RAISE EXCEPTION 'pg_migrate: code=pg_migrate_uniqueness_error, migration=%, ordinal=%, template_version=%, builder_version=%, migrator_version=%, database_version', migration, ordinal, template_version, builder_version, migrator_version, (select version());
+                RAISE EXCEPTION 'pg_migrate: code=pg_migrate_uniqueness_error, migration=%, ordinal=%, template_version=%, builder_version=%, migrator_version=%, database_version=%', migration, ordinal, template_version, builder_version, migrator_version, (select version());
     END;
 
     IF found_pg_migrate_id IS NULL THEN
